@@ -1,0 +1,183 @@
+---
+output: 
+  pdf_document:
+    keep_tex: yes
+    fig_caption: yes
+    number_sections: yes
+geometry: margin=2.54cm
+title: Experiment Title
+subtitle: Web address for GitHub repository
+author: Your Name
+abstract: "Experimental overview. This section should be no longer than 250 words."
+fontsize: 12pt
+mainfont: Times New Roman
+editor_options: 
+  chunk_output_type: console
+---
+
+<Information in these brackets are used for annotating the RMarkdown file. They will not appear in the final version of the PDF document>
+
+\newpage
+\tableofcontents 
+\newpage
+\listoftables 
+\newpage
+\listoffigures 
+\newpage
+
+<Setup the global options for the R chunks in your document>
+
+```{r global options, include = FALSE}
+knitr::opts_chunk$set(fig.width=4, fig.height=3,echo=TRUE, warning=FALSE, message=FALSE)
+```
+
+
+<Note: set up autoreferencing for figures and tables in your document>
+
+```{r setup, include=FALSE}
+# Set your working directory
+getwd()
+# Load your packages
+library(tidyverse, quietly = TRUE)
+library(leaflet)
+library(sf)
+# Set your ggplot theme
+WalkersTheme <- theme_bw(base_size = 12) +
+  theme(legend.position = "top")
+
+theme_set(WalkersTheme)
+```
+
+
+# Research Question and Rationale
+
+<Paragraph detailing the rationale for your analysis. What is the significant application and/or interest in this topic? Connect to environmental topic(s)/challenge(s).>
+
+<Paragraph detailing your research question(s) and goals. What do you want to find out? Include a sentence (or a few) on the dataset you are using to answer this question - just enough to give your reader an idea of where you are going with the analysis.>
+
+\newpage
+
+# Dataset Information
+
+<Information on how the dataset for this analysis were collected, the data contained in the dataset, and any important pieces of information that are relevant to your analyses. This section should contain much of same information as the README file for the dataset but formatted in a way that is more narrative.>
+
+<Add a table that summarizes your data structure. This table can be made in markdown text or inserted as a `kable` function in an R chunk. If the latter, do not include the code used to generate your table.>
+
+\newpage
+
+# Exploratory Data Analysis and Wrangling
+
+<Include R chunks for 5+ lines of summary code (display code and output), 3+ exploratory graphs (display graphs only), and any wrangling you do to your dataset(s).> 
+
+```{r Exploratory}
+## read in nutrient data
+klamath <- read.csv("./Data/RAW/Klamath_River_Nutrients_Raw.csv", header = T)
+## read in station data
+stations <- read.csv("./Data/RAW/Klamath_River_Stations_Raw.csv", header = T) 
+
+## reformat date
+klamath$ActivityStartDate <- as.Date(klamath$ActivityStartDate,
+                                     format = "%Y-%m-%d")
+
+## keep only useful columns, select for columns
+klamath_data <- klamath %>%
+  select(ActivityStartDate, ActivityStartTime.Time, MonitoringLocationIdentifier,
+         CharacteristicName, ResultSampleFractionText, ResultMeasureValue,
+         ResultMeasure.MeasureUnitCode, ResultDepthHeightMeasure.MeasureValue,
+         ResultDepthHeightMeasure.MeasureUnitCode)
+
+## rename columns
+names(klamath_data) <- c("Date", "Time", "Location", "Nutrient", "SampleFraction",
+                         "Concentration", "ConcentrationUnits", "Depth", "DepthUnit")
+
+## data summary
+summary(klamath_data)
+
+## remove duplicates using distinct()
+klamath_distinct <- distinct(klamath_data)
+## there are still 13 pairs of data collected at the same time and location, but
+## with different results. Removing will not substantially affect data trends, so
+## remove one data point from each pair.
+
+klamath_distinct <- klamath_distinct[-c(882, 884, 888, 889, 893, 896, 957, 1011,
+                                        879, 881, 883, 887, 946, 950, 955, 959,
+                                        1008),]
+
+## spread data
+klamath_spread <- spread(data = klamath_distinct, Nutrient, Concentration)
+
+## remove space from Organic carbon column name
+names(klamath_spread)[9] <- c("Organic_Carbon")
+
+## select location columns and join to nutrient data
+stations_loc <- stations %>%
+  select(MonitoringLocationIdentifier, MonitoringLocationName, LatitudeMeasure,
+         LongitudeMeasure, HorizontalCoordinateReferenceSystemDatumName)
+# rename location column to match klamath spread column name for joining
+names(stations_loc)[1] <- c("Location")
+
+klamath_spread_loc <- left_join(klamath_spread, stations_loc, by = "Location")
+
+summary(klamath_spread_loc$HorizontalCoordinateReferenceSystemDatumName)
+
+## join station location data to nutrient data
+
+
+## exploratory figures
+
+## scatter plots
+
+## carbon levels at each site over time
+ggplot(klamath_spread) +
+  geom_point(aes(x = Date, y = Organic_Carbon, alpha = 0.5, color = Nitrogen)) #+
+  #facet_wrap(vars(Location), nrow = 2)
+
+## nitrogen levels at each site over time
+ggplot(klamath_spread) +
+  geom_point(aes(x = Date, y = Nitrogen, alpha = 0.5, color = Phosphorus))
+
+## phosphorus levels over time
+ggplot(klamath_spread) +
+  geom_point(aes(x = Date, y = Phosphorus, alpha = 0.5, color = Nitrogen))
+
+## Boxplots
+
+## carbon boxplot separated by site
+ggplot(klamath_spread) +
+  geom_boxplot(aes(x = Location, y = Organic_Carbon, color = Location)) #+
+  #facet_wrap(vars(Location), nrow = 2)
+
+## nitrogen boxplot separated by site
+ggplot(klamath_spread) +
+  geom_boxplot(aes(x = Location, y = Nitrogen, color = Location)) #+
+  #facet_wrap(vars(Location), nrow = 2)
+
+## phosphorus boxplot separated by site
+ggplot(klamath_spread) +
+  geom_boxplot(aes(x = Location, y = Phosphorus)) #+
+  #facet_wrap(vars(Location), nrow = 2)
+
+summary(klamath_spread$Organic_Carbon)
+
+## power analysis: how many observations do I need to make for my test to be robust and
+## show a relationship if there is one
+```
+
+<Include text sections to accompany these R chunks to explain the reasoning behind your workflow, and the rationale for your approach.>
+
+
+\newpage
+
+# Analysis
+<Include R chunks for 3+ statistical tests (display code and output) and 3+ final visualization graphs (display graphs only).>
+
+<Include text sections to accompany these R chunks to explain the reasoning behind your workflow, rationale for your approach, and the justification of meeting or failing to meet assumptions of tests.>
+
+
+\newpage
+
+# Summary and Conclusions
+<Summarize your major findings from your analyses. What conclusions do you draw from your findings? Make sure to apply this to a broader application for the research question you have answered.>
+
+
+

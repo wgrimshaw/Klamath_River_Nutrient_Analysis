@@ -1,0 +1,84 @@
+---
+title: "Klamath River Nutrient Analysis"
+author: "Walker Grimshaw"
+date: "3/31/2019"
+output: pdf_document
+geometry: margin=2.54cm
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+## Exploratory Analysis
+
+```{r cars}
+getwd()
+## read in data
+klamath <- read.csv("./Data/RAW/Klamath_River_Nutrients_Raw.csv", header = T)
+
+## reformat date
+klamath$ActivityStartDate <- as.Date(klamath$ActivityStartDate,
+                                     format = "%Y-%m-%d")
+
+## keep only useful columns, select for columns
+klamath_data <- klamath %>%
+  select(ActivityStartDate, ActivityStartTime.Time, MonitoringLocationIdentifier,
+         CharacteristicName, ResultSampleFractionText, ResultMeasureValue,
+         ResultMeasure.MeasureUnitCode, ResultDepthHeightMeasure.MeasureValue,
+         ResultDepthHeightMeasure.MeasureUnitCode)
+
+## rename columns
+names(klamath_data) <- c("Date", "Time", "Location", "Nutrient", "SampleFraction",
+                         "Concentration", "ConcentrationUnits", "Depth", "DepthUnit")
+
+## data summary
+summary(klamath_data)
+
+## remove duplicates using distinct()
+klamath_distinct <- distinct(klamath_data)
+## there are still two pairs of data collected at the same time and location, but
+## with different results. Removing will not substantially affect data trends, so
+## remove one data point from each pair.
+
+klamath_distinct <- klamath_distinct[-c(2206,2207),]
+
+## spread data
+klamath_spread <- spread(data = klamath_distinct, Nutrient, Concentration)
+
+## remove space from Organic carbon column name
+names(klamath_spread)[9] <- c("Organic_Carbon")
+
+## exploratory figures
+## boxplots by site
+## nitrogen levels at each site over time
+ggplot(klamath_spread) +
+  geom_line(aes(x = Date, y = Organic_Carbon)) +
+  facet_wrap(vars(Location), nrow = 2)
+
+## phosphorus at each site over time
+ggplot(klamath_spread) +
+  geom_boxplot(aes(x = Location, y = Phosphorus)) #+
+  #facet_wrap(vars(Location), nrow = 2)
+
+## carbon at each site over time
+ggplot(klamath_spread) +
+  geom_boxplot(aes(x = Location, y = Organic_Carbon, color = Location)) #+
+  #facet_wrap(vars(Location), nrow = 2)
+
+summary(klamath_spread$Organic_Carbon)
+
+## power analysis: how many observations do I need to make for my test to be robust and
+## show a relationship if there is one
+```
+
+```{r}
+## remove all nas to see how much data remains
+klamath_complete <- klamath_spread %>%
+  filter(!is.na(Nitrogen) & !is.na(Phosphorus) & !is.na(Organic_Carbon))
+## only 36 data points in klamath_complete
+```
+

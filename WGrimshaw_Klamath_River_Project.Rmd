@@ -6,8 +6,8 @@ output:
     number_sections: yes
 geometry: margin=2.54cm
 title: Experiment Title
-subtitle: Web address for GitHub repository
-author: Your Name
+subtitle: https://github.com/wgrimshaw/Klamath_River_Nutrient_Analysis
+author: Walker Grimshaw
 abstract: "Experimental overview. This section should be no longer than 250 words."
 fontsize: 12pt
 mainfont: Times New Roman
@@ -31,7 +31,6 @@ editor_options:
 knitr::opts_chunk$set(fig.width=4, fig.height=3,echo=TRUE, warning=FALSE, message=FALSE)
 ```
 
-
 <Note: set up autoreferencing for figures and tables in your document>
 
 ```{r setup, include=FALSE}
@@ -41,6 +40,7 @@ getwd()
 library(tidyverse, quietly = TRUE)
 library(leaflet)
 library(sf)
+library(gridExtra)
 # Set your ggplot theme
 WalkersTheme <- theme_bw(base_size = 12) +
   theme(legend.position = "top")
@@ -52,6 +52,8 @@ theme_set(WalkersTheme)
 # Research Question and Rationale
 
 <Paragraph detailing the rationale for your analysis. What is the significant application and/or interest in this topic? Connect to environmental topic(s)/challenge(s).>
+
+The Klamath River Basin covers over 15,000 square miles in Southern Oregon and Northern California between the Cascade Mountains and the Basin and Range Province. Though 75% of the basin is forested, including five national forests, another 20% of the basin is used for agriculture or as rangeland for grazing. Almost all of this agricultural land lies in the Upper Klamath River Basin. This agricultural land increases nutrient loading to the river, though previous studies have also shown that groundwater contributes significant nutrients, due to the basin's geology. California lists stretches of the Klamath River as impaired, due to mostly to high temperatures and excess nutrient loading. These high temperatures and nutrient loading, paired with a number of dams along the river's main stem, have negative impacts for the river's biotic communities. Indeed, there are two fish species listed as endangered and one fish species listed as threatened under the Federal Endangered Species Act in the Klamath River. Biotic data for the Klamath River is sparse, so nutrient data is analyzed here, due to its impact on biotic communities, including the endangered fish species in the river. Additionally, this analysis is especially relevant because the four primary Klamath River dams are under review for removal  
 
 <Paragraph detailing your research question(s) and goals. What do you want to find out? Include a sentence (or a few) on the dataset you are using to answer this question - just enough to give your reader an idea of where you are going with the analysis.>
 
@@ -109,19 +111,63 @@ klamath_spread <- spread(data = klamath_distinct, Nutrient, Concentration)
 ## remove space from Organic carbon column name
 names(klamath_spread)[9] <- c("Organic_Carbon")
 
-## select location columns and join to nutrient data
+## select location columns
 stations_loc <- stations %>%
   select(MonitoringLocationIdentifier, MonitoringLocationName, LatitudeMeasure,
          LongitudeMeasure, HorizontalCoordinateReferenceSystemDatumName)
-# rename location column to match klamath spread column name for joining
+## rename location column to match klamath spread column name for joining
 names(stations_loc)[1] <- c("Location")
+# make into an sf object
+stations_sf <- st_as_sf(stations_loc,
+                       coords = c('LongitudeMeasure', 'LatitudeMeasure'),crs=4269)
+## change coordinate system to UTM Zone 10N, EPSG: 26910
+stations_UTM <- st_transform(stations_sf, crs=26910)
 
-klamath_spread_loc <- left_join(klamath_spread, stations_loc, by = "Location")
+## calculate distance from site KLAMATHTRIBES_WQX-WR6000 to all other sites
+Distance_to_MODOC <- stations_UTM %>% 
+  filter(Location == 'KLAMATHTRIBES_WQX-WR6000') %>%
+  st_distance(stations_UTM) %>%       #Compute distances to all other sites
+  data.frame() %>%  t                         #Transpose the result
+## add the distance vector to the stations_loc dataframe,
+## converting from meters to kilometers
+stations_UTM$distance <- Distance_to_MODOC/1000
 
-summary(klamath_spread_loc$HorizontalCoordinateReferenceSystemDatumName)
+## change two upstream sites to have negative distances
+## KLAMATHTRIBES_WQX-SR0080 and KLAMATHTRIBES_WQX-WR2000
+stations_UTM$distance[125] <- stations_UTM$distance[125]*-1
+stations_UTM$distance[130] <- stations_UTM$distance[130]*-1
 
-## join station location data to nutrient data
+## join nutrient data with location data
+klamath_spread_loc <- left_join(klamath_spread, stations_UTM, by = "Location")
+klamath_spread_sf <- st_as_sf(klamath_spread_loc,sf_column_name = 'geometry')
 
+## summary table
+klamath_summary_UTM <- klamath_spread_sf %>%
+  group_by(Location) %>%
+  summarize(meanN = mean(Nitrogen, na.rm = T), meanP = mean(Phosphorus, na.rm = T),
+            meanC = mean(Organic_Carbon, na.rm = T))
+
+klamath_summary_WGS <- st_transform(klamath_summary_UTM, crs = 4326)
+```
+
+There are three different datums, NAD27, NAD83, and WGS 84. I am treating them all as NAD83 because the difference will be small compared to the scale that separates monitoring stations. 
+
+```{r}
+## locations of sites
+ggplot() + 
+  geom_sf(data=klamath_spread_sf, aes(color=Organic_Carbon), size=4)
+
+## leaflet of sites
+leaflet() %>% # create the object
+  #addTiles() %>%
+  addProviderTiles(providers$Esri.OceanBasemap) %>% # basemap, follow link above to find names like Esri.NatGeoWorlMap  
+  #addPolygons(data = counties_WGS84, color = "orange", weight = 1, smoothFactor = 0.5,   
+  #            opacity = 1.0, fillOpacity = 0.5,
+  #            fillColor = ~colorQuantile("YlGnBu", ALAND)(ALAND)) %>% 
+  #addPolygons(data = huc2_WGS84, color=NA, weight = 2) %>% 
+  addCircleMarkers(data=klamath_summary_WGS)#,
+                   stroke = FALSE,
+                   fillColor = ~meanN*50)
 
 ## exploratory figures
 
@@ -158,6 +204,22 @@ ggplot(klamath_spread) +
   #facet_wrap(vars(Location), nrow = 2)
 
 summary(klamath_spread$Organic_Carbon)
+
+## nitrogen by distance downstream
+nitrogen_dist <- ggplot(klamath_spread_sf) +
+  geom_point(aes(x = distance, y = Nitrogen, alpha = 0.2), color = "dark blue") +
+  scale_y_log10() +
+  labs(y = expression(paste("Nitrogen (", mu, "g/L)" )),
+       x = "Stream Distance from Entrance\n to Upper Klamath Lake (km)") +
+  theme(legend.position = "none")
+phosphorus_dist <- ggplot(klamath_spread_sf) +
+  geom_point(aes(x = distance, y = Phosphorus, alpha = 0.2), color = "dark green") +
+  scale_y_log10() +
+  labs(y = expression(paste("Phosphorus (", mu, "g/L)" )),
+       x = "Stream Distance from Entrance\n to Upper Klamath Lake (km)") +
+  theme(legend.position = "none")
+
+grid.arrange(nitrogen_dist, phosphorus_dist, ncol = 1)
 
 ## power analysis: how many observations do I need to make for my test to be robust and
 ## show a relationship if there is one

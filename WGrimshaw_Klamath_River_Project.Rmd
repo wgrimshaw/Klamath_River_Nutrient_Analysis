@@ -41,6 +41,9 @@ library(tidyverse, quietly = TRUE)
 library(leaflet)
 library(sf)
 library(gridExtra)
+library(kableExtra)
+library(ggmap)
+library(ggspatial)
 # Set your ggplot theme
 WalkersTheme <- theme_bw(base_size = 12) +
   theme(legend.position = "top")
@@ -53,9 +56,11 @@ theme_set(WalkersTheme)
 
 <Paragraph detailing the rationale for your analysis. What is the significant application and/or interest in this topic? Connect to environmental topic(s)/challenge(s).>
 
-The Klamath River Basin covers over 15,000 square miles in Southern Oregon and Northern California between the Cascade Mountains and the Basin and Range Province. Though 75% of the basin is forested, including five national forests, another 20% of the basin is used for agriculture or as rangeland for grazing. Almost all of this agricultural land lies in the Upper Klamath River Basin. This agricultural land increases nutrient loading to the river, though previous studies have also shown that groundwater contributes significant nutrients, due to the basin's geology. California lists stretches of the Klamath River as impaired, due to mostly to high temperatures and excess nutrient loading. These high temperatures and nutrient loading, paired with a number of dams along the river's main stem, have negative impacts for the river's biotic communities. Indeed, there are two fish species listed as endangered and one fish species listed as threatened under the Federal Endangered Species Act in the Klamath River. Biotic data for the Klamath River is sparse, so nutrient data is analyzed here, due to its impact on biotic communities, including the endangered fish species in the river. Additionally, this analysis is especially relevant because the four primary Klamath River dams are under review for removal  
+The Klamath River Basin covers over 15,000 square miles in Southern Oregon and Northern California between the Cascade Mountains and the Basin and Range Province. Though 75% of the basin is forested, including five national forests, another 20% of the basin is used for agriculture or as rangeland for grazing. Almost all of this agricultural land lies in the Upper Klamath River Basin. This agricultural land increases nutrient loading to the river, though previous studies have also shown that groundwater contributes significant nutrients, due to the basin's geology. California lists stretches of the Klamath River as impaired, due to mostly to high temperatures and excess nutrient loading. These high temperatures and nutrient loading, paired with a number of dams along the river's main stem, have negative impacts for the river's biotic communities. Indeed, there are two fish species listed as endangered and one fish species listed as threatened under the Federal Endangered Species Act in the Klamath River. Biotic data for the Klamath River is sparse, so nutrient data is analyzed here, due to its impact on biotic communities, including the endangered fish species in the river. Additionally, this analysis is especially relevant because the four primary Klamath River dams are under review for removal, and the removals would cost an estimated $400 million.  
 
 <Paragraph detailing your research question(s) and goals. What do you want to find out? Include a sentence (or a few) on the dataset you are using to answer this question - just enough to give your reader an idea of where you are going with the analysis.>
+
+This analysis investigates the spatial distribution of nitrogen, phosphorus, and organic carbon along the Klamath River, beginning at two tributaries just above Upper Klamath Lake. As the majority of agricultural land is above Upper Klamath Lake and the water level of the lake is controlled at the Link River Dam, this analysis predicts that nutrient levels will decrease along the length of the river. 
 
 \newpage
 
@@ -63,7 +68,16 @@ The Klamath River Basin covers over 15,000 square miles in Southern Oregon and N
 
 <Information on how the dataset for this analysis were collected, the data contained in the dataset, and any important pieces of information that are relevant to your analyses. This section should contain much of same information as the README file for the dataset but formatted in a way that is more narrative.>
 
+The data for this analysis was downloaded from the National Water Quality Monitoring Council's Water Quality Data Portal at https://www.waterqualitydata.us/portal/. The dataset analyzed contains data on Organic Carbon, Nitrogen, and Phosphorus at 25 sampling sites along the Klamath River from January 1st, 2000 to January 1st, 2019. Not all sites collect data on all three nutrients. This nutrient dataset was paired with location data for all 159 water quality monitoring stations in the Klamath River Basin, HUC code 180102. The 25 sites for which data was downloaded were selected to provide data throughout the length of the river, and each site must have data from at least 20 sampling events.
+
 <Add a table that summarizes your data structure. This table can be made in markdown text or inserted as a `kable` function in an R chunk. If the latter, do not include the code used to generate your table.>
+
+```{r kable}
+#structure(klamath_spread)
+#summary(klamath_spread)
+#kable(phosphorus)
+```
+
 
 \newpage
 
@@ -71,7 +85,11 @@ The Klamath River Basin covers over 15,000 square miles in Southern Oregon and N
 
 <Include R chunks for 5+ lines of summary code (display code and output), 3+ exploratory graphs (display graphs only), and any wrangling you do to your dataset(s).> 
 
-```{r Exploratory}
+## Nutrient Data Wrangling
+
+The raw nutrient data contains superfluous information, so all data was removed from the dataset besides sampling location information, the date and time of the sampling activity, and the measured nutrient concentrations. The raw dataset also contains information on the type of sample (total, dissolved, filtered, etc.) and the units of measurement. Since the sample measurements are not comparable across sample types, only data for the most common sample type of each nutrient were retained for analysis.
+
+```{r Wrangling Nutrient Data}
 ## read in nutrient data
 klamath <- read.csv("./Data/RAW/Klamath_River_Nutrients_Raw.csv", header = T)
 ## read in station data
@@ -92,9 +110,6 @@ klamath_data <- klamath %>%
 names(klamath_data) <- c("Date", "Time", "Location", "Nutrient", "SampleFraction",
                          "Concentration", "ConcentrationUnits", "Depth", "DepthUnit")
 
-## data summary
-summary(klamath_data)
-
 ## remove duplicates using distinct()
 klamath_distinct <- distinct(klamath_data)
 ## there are still 13 pairs of data collected at the same time and location, but
@@ -105,12 +120,64 @@ klamath_distinct <- klamath_distinct[-c(882, 884, 888, 889, 893, 896, 957, 1011,
                                         879, 881, 883, 887, 946, 950, 955, 959,
                                         1008),]
 
+## Get all data of each nutrient into the same sample fraction type and units
+## filter the nutrients separately
+carbon <- filter(klamath_distinct, Nutrient == "Organic carbon")
+nitrogen <- filter(klamath_distinct, Nutrient == "Nitrogen")
+phosphorus <- filter(klamath_distinct, Nutrient == "Phosphorus")
+
+## determine which sample type to keep
+# summary(carbon$SampleFraction) # keep dissolved
+carbon_dissolved <- filter(carbon, SampleFraction == "Dissolved")
+# summary(nitrogen$SampleFraction) # keep total
+nitrogen_total <- filter(nitrogen, SampleFraction == "Total")
+summary(phosphorus$SampleFraction) # keep total
+phosphorus_total <- filter(phosphorus, SampleFraction == "Total")
+# summary(carbon_dissolved$ConcentrationUnits)
+
+## Convert ug/l to mg/l for nitrogen and phosphorus, and make a factor
+nitrogen_ug_to_mg <- nitrogen_total %>%
+  filter(ConcentrationUnits == "ug/l") %>%
+  mutate(Concentration = Concentration/1000) %>%
+  mutate(ConcentrationUnits = as.factor("mg/l"))
+
+phosphorus_ug_to_mg <- phosphorus_total %>%
+  filter(ConcentrationUnits == "ug/l") %>%
+  mutate(Concentration = Concentration/1000) %>%
+  mutate(ConcentrationUnits = as.factor("mg/l"))  
+  
+## Remove everything but mg/l from nitrogen_total and phosphorus_total
+## bind_rows() to converted data
+nitrogen_total_mg <- nitrogen_total %>%
+  filter(ConcentrationUnits == "mg/l") %>%
+  bind_rows(nitrogen_ug_to_mg) %>%
+  mutate(ConcentrationUnits = as.factor(ConcentrationUnits))
+
+phosphorus_total_mg <- phosphorus_total %>%
+  filter(ConcentrationUnits == "mg/l") %>%
+  bind_rows(phosphorus_ug_to_mg) %>%
+  mutate(ConcentrationUnits = as.factor(ConcentrationUnits))
+
+## bind_rows to re-unite all nutrient data
+klamath_clean <- bind_rows(carbon_dissolved,
+                           phosphorus_total_mg,
+                           nitrogen_total_mg) %>%
+  mutate(ConcentrationUnits = as.factor(ConcentrationUnits))
+
 ## spread data
-klamath_spread <- spread(data = klamath_distinct, Nutrient, Concentration)
+klamath_spread <- spread(data = klamath_clean, Nutrient, Concentration)
 
 ## remove space from Organic carbon column name
 names(klamath_spread)[9] <- c("Organic_Carbon")
+```
 
+The most common sample type for organic carbon was dissolved, and the most common sample type for both nitrogen and phosphorus was total. After selecting for only these types of samples, all units were converted to mg/L. The phosphorous data also contained measurements in mg/L as P and mg/kg as P. As these could not be converted to mg/L, they were removed.
+
+## Station Location Data Wrangling
+
+The locations of the stations were reported using three different datums; NAD27, NAD83, and WGS84. However, all three datums were treated as NAD83 because the difference in computed distance is small compared to the scale that separates monitoring stations. Also, rather than following the path of the river to determine station separation distance, the distances were computed as straight line distance from the entrance to Upper Klamath Lake, station ID KLAMATHTRIBES_WQX-WR6000. This distance was used an estimated proxy for distance downstream. 
+
+```{r Wrangling Spatial Data}
 ## select location columns
 stations_loc <- stations %>%
   select(MonitoringLocationIdentifier, MonitoringLocationName, LatitudeMeasure,
@@ -120,7 +187,7 @@ names(stations_loc)[1] <- c("Location")
 # make into an sf object
 stations_sf <- st_as_sf(stations_loc,
                        coords = c('LongitudeMeasure', 'LatitudeMeasure'),crs=4269)
-## change coordinate system to UTM Zone 10N, EPSG: 26910
+## change coordinate system to UTM Zone 10N, EPSG: 26910, for distance calculations
 stations_UTM <- st_transform(stations_sf, crs=26910)
 
 ## calculate distance from site KLAMATHTRIBES_WQX-WR6000 to all other sites
@@ -141,6 +208,10 @@ stations_UTM$distance[130] <- stations_UTM$distance[130]*-1
 klamath_spread_loc <- left_join(klamath_spread, stations_UTM, by = "Location")
 klamath_spread_sf <- st_as_sf(klamath_spread_loc,sf_column_name = 'geometry')
 
+## create a separate sf object that is only the origin station
+station_origin <- filter(klamath_spread_sf,
+                         Location == 'KLAMATHTRIBES_WQX-WR6000')
+
 ## summary table
 klamath_summary_UTM <- klamath_spread_sf %>%
   group_by(Location) %>%
@@ -150,41 +221,59 @@ klamath_summary_UTM <- klamath_spread_sf %>%
 klamath_summary_WGS <- st_transform(klamath_summary_UTM, crs = 4326)
 ```
 
-There are three different datums, NAD27, NAD83, and WGS 84. I am treating them all as NAD83 because the difference will be small compared to the scale that separates monitoring stations. 
+```{r summaries}
+## data summary
+summary(klamath_data)
 
-```{r}
+## dataframe of only sampling events with all three nutrients
+klamath_complete <- klamath_spread %>%
+  filter(!is.na(Nitrogen) & !is.na(Phosphorus) & !is.na(Organic_Carbon))
+## there are no sampling events where data was collected for all nutrients
+```
+
+
+
+```{r location plot, fig.cap= "Locations of the 25 stations for which data was analyzed along the Klamath River"}
 ## locations of sites
-ggplot() + 
-  geom_sf(data=klamath_spread_sf, aes(color=Organic_Carbon), size=4)
+ggplot(klamath_spread_sf) + 
+  annotation_map_tile(zoom = 7) +
+  geom_sf(data=klamath_spread_sf, size=4, color = "blue") +
+  geom_sf(data=station_origin, size = 5, color = "red") +
+  theme_minimal()
 
 ## leaflet of sites
-leaflet() %>% # create the object
+#leaflet() %>% # create the object
   #addTiles() %>%
-  addProviderTiles(providers$Esri.OceanBasemap) %>% # basemap, follow link above to find names like Esri.NatGeoWorlMap  
+#  addProviderTiles(providers$Esri.OceanBasemap) %>% # basemap, follow link above to find names like Esri.NatGeoWorlMap  
   #addPolygons(data = counties_WGS84, color = "orange", weight = 1, smoothFactor = 0.5,   
   #            opacity = 1.0, fillOpacity = 0.5,
   #            fillColor = ~colorQuantile("YlGnBu", ALAND)(ALAND)) %>% 
   #addPolygons(data = huc2_WGS84, color=NA, weight = 2) %>% 
-  addCircleMarkers(data=klamath_summary_WGS)#,
-                   stroke = FALSE,
-                   fillColor = ~meanN*50)
+#  addCircleMarkers(data=klamath_summary_WGS)#,
+  #                 stroke = FALSE,
+  #                 fillColor = ~meanN*50)
+```
 
+```{r Exploratory Figure 1}
 ## exploratory figures
 
 ## scatter plots
 
 ## carbon levels at each site over time
-ggplot(klamath_spread) +
-  geom_point(aes(x = Date, y = Organic_Carbon, alpha = 0.5, color = Nitrogen)) #+
-  #facet_wrap(vars(Location), nrow = 2)
+ggplot(klamath_spread_sf) +
+  geom_point(aes(x = Date, y = Organic_Carbon, alpha = 0.5, color = distance))
 
 ## nitrogen levels at each site over time
-ggplot(klamath_spread) +
-  geom_point(aes(x = Date, y = Nitrogen, alpha = 0.5, color = Phosphorus))
+ggplot(klamath_spread_sf) +
+  geom_point(aes(x = Date, y = Nitrogen, alpha = 0.5, color = distance)) +
+  ylim(0, 4)
+## possible slight decrease over time
 
 ## phosphorus levels over time
-ggplot(klamath_spread) +
-  geom_point(aes(x = Date, y = Phosphorus, alpha = 0.5, color = Nitrogen))
+ggplot(klamath_spread_sf) +
+  geom_point(aes(x = Date, y = Phosphorus, alpha = 0.5, color = distance)) +
+  guides(alpha = FALSE)
+## possible slight decrease over time
 
 ## Boxplots
 
@@ -212,6 +301,8 @@ nitrogen_dist <- ggplot(klamath_spread_sf) +
   labs(y = expression(paste("Nitrogen (", mu, "g/L)" )),
        x = "Stream Distance from Entrance\n to Upper Klamath Lake (km)") +
   theme(legend.position = "none")
+
+## phosphorus by distance downstream
 phosphorus_dist <- ggplot(klamath_spread_sf) +
   geom_point(aes(x = distance, y = Phosphorus, alpha = 0.2), color = "dark green") +
   scale_y_log10() +
@@ -219,10 +310,15 @@ phosphorus_dist <- ggplot(klamath_spread_sf) +
        x = "Stream Distance from Entrance\n to Upper Klamath Lake (km)") +
   theme(legend.position = "none")
 
-grid.arrange(nitrogen_dist, phosphorus_dist, ncol = 1)
+## carbon by distance downstream
+carbon_dist <- ggplot(klamath_spread_sf) +
+  geom_point(aes(x = distance, y = Organic_Carbon, alpha = 0.2)) +
+  scale_y_log10() +
+  labs(y = "Dissolved Organic Carbon (mg/L)",
+       x = "Stream Distance from Entrance\n to Upper Klamath Lake (km)") +
+  theme(legend.position = "none")
 
-## power analysis: how many observations do I need to make for my test to be robust and
-## show a relationship if there is one
+grid.arrange(nitrogen_dist, phosphorus_dist, carbon_dist, ncol = 1)
 ```
 
 <Include text sections to accompany these R chunks to explain the reasoning behind your workflow, and the rationale for your approach.>
@@ -232,6 +328,30 @@ grid.arrange(nitrogen_dist, phosphorus_dist, ncol = 1)
 
 # Analysis
 <Include R chunks for 3+ statistical tests (display code and output) and 3+ final visualization graphs (display graphs only).>
+
+A fixed effects model was created for each nutrient, using distance downstream and sample date as independent variables.
+
+```{r Nitrogen Statistics}
+## concentration as determined by date and distance downstream
+lm_nitrogen <- lm(data = klamath_spread_sf, Nitrogen ~ distance + Date)
+summary(lm_nitrogen)
+```
+
+Distance downstream from the entrance to Upper Klamath Lake does not appear to have a statistically significant impact on nitrogen concentration.
+
+```{r Phosphorus Statistics}
+## concentration as determined by date and distance downstream
+lm_phosphorus <- lm(data = klamath_spread_sf, Phosphorus ~ distance*Date)
+summary(lm_phosphorus)
+```
+
+Neither distance downstream nor sample date appear to have a statistically signficant impact on phosphorus concentration.
+
+```{r Carbon Statistics}
+## concentration as determined by date and distance downstream
+lm_phosphorus <- lm(data = klamath_spread_sf, Phosphorus ~ distance + Date)
+summary(lm_phosphorus)
+```
 
 <Include text sections to accompany these R chunks to explain the reasoning behind your workflow, rationale for your approach, and the justification of meeting or failing to meet assumptions of tests.>
 
